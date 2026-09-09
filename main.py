@@ -3,7 +3,7 @@ import os
 import time
 import sqlite3
 
-# 파이프라인 모듈 임포트
+# 파이프라인 모듈 임포트1
 from csv_to_db_etl import sync_csv_to_db
 from hard_filter_engine import HardFilterEngine
 from soft_scoring_engine import SoftScoringEngine
