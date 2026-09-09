@@ -1,7 +1,21 @@
-# Byte-compiled / optimized / DLL files
+# Database & Cache
+lotto.db
+lotto_master_pool.npy
+
+# Output & System Directories
+predictions/
 __pycache__/
-*.py[codz]
-*$py.class
+.idea/
+
+# Accidental Type-Hint Artifacts (삭제 권장)
+bool
+int
+None
+Optional[Dict[str*
+sqlite3.Connection
+Tuple[int*
+urllib.request.OpenerDirector
+
 
 # C extensions
 *.so
