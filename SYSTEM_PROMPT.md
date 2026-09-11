@@ -18,4 +18,10 @@
 ## 4. 엔지니어링 및 코딩 표준
 - **SQLite**: 파라미터 바인딩(`?`) 필수 사용, `with sqlite3.connect(...)` 컨텍스트 매니저 기반 트랜잭션 관리, `PRAGMA` 튜닝 및 `executemany` 배치 적용.
 - **Pythonic**: 명확한 타입 힌팅(Type Hinting), `try-except-finally` 예외 처리 준수.
+- **모듈화**: Hard Filter, Soft Scoring, Audit 모듈의 책임이 엄격히 분리된 함수/클래스 설계.
 - **고속 연산**: Pandas, NumPy 벡터 연산 및 `.npy` 무압축 바이너리 메모리 캐싱 기법 적용.
+
+## 5. 지침 및 프로젝트 규격 상호 참조 (Cross-Reference)
+- **CLI 메뉴 및 모듈 구조**: 전체 15-Way CLI 구성 및 소스 코드 파일 역할 명세는 `README.md`를 기준으로 코딩합니다.
+- **DB 스키마 및 알고리즘 규격**: DB 테이블 구조, 1/2단계 필터 공식, 가중치 배점표, 수동 제어 알고리즘은 `ARCHITECTURE.md`의 기술 규격을 100% 준수합니다.
+- 변경 사항 구현 시 위 문서들에 명시된 제약 조건과 수학적 모델을 왜곡 없이 반영해야 합니다.

@@ -1,8 +1,20 @@
+"""
+Module: hard_filter_engine.py
+Version: 1.9
+Last Updated: 2026-09-11
+
+[모듈 책임]
+- 8,145,060건 마스터 조합 풀(.npy 무압축 바이너리 캐시) 고속 메모리 로드 및 관리.
+- Pure NumPy C-Backend 기반 7대 기본 Hard Filter AND 연산 일괄 타격.
+- 런타임 선택형 6대 동적 패턴 필터(5~10회차 통계 의존) 벡터 마스킹.
+- 독소 조합 배제 통계 리포트 출력 및 1단계 생존 인덱스/데이터 배열 반환.
+"""
 import sqlite3
 import numpy as np
 import time
 import os
 import sys
+from typing import Tuple, Optional, Dict, Any
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_NAME = os.path.join(BASE_DIR, "lotto.db")
@@ -11,25 +23,52 @@ TOTAL_COMBINATIONS = 8145060
 
 
 class HardFilterEngine:
+    """
+    [v1.9] 1단계 절대 탈락 지대(Hard Filter) 벡터라이징 필터링 엔진.
+
+    NumPy C-API 수준의 메모리 연속성 배열 연산을 활용하여 814만 건의 조합에서
+    인간의 마킹 패턴 및 통계적 극단치를 제거하고 정상 조합 생존 풀을 형성한다.
+    """
+
     def __init__(self, db_path: str = DB_NAME):
-        """DB 커넥션 및 메모리 최적화 바이너리 캐시 로드"""
+        """
+        [v1.9] HardFilterEngine 초기화 및 DB 커넥션 설정.
+
+        Args:
+            db_path (str): 대상 SQLite 데이터베이스 파일 경로.
+
+        Raises:
+            FileNotFoundError: 데이터베이스 파일이 디스크에 존재하지 않을 경우 발생.
+        """
         if not os.path.exists(db_path):
             raise FileNotFoundError(f"[시스템 예외] DB 파일을 찾을 수 없습니다: {db_path}")
-            
+
         self.db_path = db_path
         self.conn = sqlite3.connect(self.db_path)
         self.combos = None
         self.comb_ids = None
         self.zone_ids = None
-        
+
         # 최신 당첨 이력 저장소
         self.history_rows = []
-        
-    def _ensure_and_load_master_pool(self):
+        self.latest_round = 0
+        self.latest_win_nums = None
+        self.latest_win_id = None
+        self.past_win_ids = None
+
+    def _ensure_and_load_master_pool(self) -> None:
         """
-        [고속 I/O 핵심 로직] 
-        .npy 캐시 파일이 존재하면 0.15초 만에 메모리에 로드하고, 
-        없을 경우 SQLite에서 최초 1회 일괄 추출하여 캐시를 자동 빌드합니다.
+        [v1.9] 마스터 조합 바이너리 캐시(.npy) 고속 로드 및 자동 빌드.
+
+        .npy 캐시 파일이 존재하면 메모리에 즉시 매핑(0.15초 내외)하고,
+        부재 시 SQLite에서 8,145,060건을 일괄 추출하여 캐시를 생성한다.
+        ID 시퀀스(uint32) 및 Zone 배열(uint8)을 무복사 벡터로 동시 생성한다.
+
+        Args:
+            None
+
+        Returns:
+            None
         """
         if os.path.exists(NPY_CACHE_PATH):
             print(" - [I/O] 마스터 조합 바이너리 캐시(.npy) 고속 로드 중...")
@@ -40,23 +79,46 @@ class HardFilterEngine:
             print(" - [I/O] 캐시 파일 부재. SQLite에서 8,145,060건 최초 1회 바이너리 빌드 시작...")
             start_build = time.perf_counter()
             cursor = self.conn.cursor()
-            cursor.execute("SELECT num1, num2, num3, num4, num5, num6 FROM LOTTO_COMBINATIONS_POOL ORDER BY combination_id ASC;")
-            rows = cursor.fetchall()
-            
-            self.combos = np.array(rows, dtype=np.uint8)
-            np.save(NPY_CACHE_PATH, self.combos)
-            print(f" - [I/O] 바이너리 캐시 생성 및 저장 완료: {NPY_CACHE_PATH} (소요 시간: {time.perf_counter() - start_build:.2f}초)")
+            try:
+                cursor.execute(
+                    "SELECT num1, num2, num3, num4, num5, num6 FROM LOTTO_COMBINATIONS_POOL ORDER BY combination_id ASC;")
+                rows = cursor.fetchall()
+
+                self.combos = np.array(rows, dtype=np.uint8)
+                np.save(NPY_CACHE_PATH, self.combos)
+                print(
+                    f" - [I/O] 바이너리 캐시 생성 및 저장 완료: {NPY_CACHE_PATH} (소요 시간: {time.perf_counter() - start_build:.2f}초)")
+            finally:
+                cursor.close()
 
         # 고정된 ID 및 Zone 배열 벡터 생성 (무복사 O(1) 메모리 할당)
         self.comb_ids = np.arange(1, TOTAL_COMBINATIONS + 1, dtype=np.uint32)
         self.zone_ids = np.minimum((np.arange(TOTAL_COMBINATIONS, dtype=np.uint32) // 814506) + 1, 10).astype(np.uint8)
 
-    def _fetch_history_data(self):
-        """역대 당첨 이력 및 직전 회차 정보 로드 (zone_id 포함)"""
+    def _fetch_history_data(self) -> None:
+        """
+        [v1.9] 역대 당첨 이력 및 직전 회차 정보 로드.
+
+        WINNING_HISTORY 테이블에서 역대 1등 당첨 번호, combination_id, zone_id를 추출하여
+        직전 회차 기준 벡터와 과거 1등 ID 배열을 메모리에 구성한다.
+
+        Args:
+            None
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: WINNING_HISTORY 테이블이 비어있어 분석이 불가능한 경우 발생.
+        """
         cursor = self.conn.cursor()
-        cursor.execute("SELECT round_no, num1, num2, num3, num4, num5, num6, bonus, combination_id, zone_id FROM WINNING_HISTORY ORDER BY round_no DESC;")
-        self.history_rows = cursor.fetchall()
-        
+        try:
+            cursor.execute(
+                "SELECT round_no, num1, num2, num3, num4, num5, num6, bonus, combination_id, zone_id FROM WINNING_HISTORY ORDER BY round_no DESC;")
+            self.history_rows = cursor.fetchall()
+        finally:
+            cursor.close()
+
         if not self.history_rows:
             raise ValueError("[데이터 결측] WINNING_HISTORY 테이블이 비어있습니다. 동기화를 먼저 수행하세요.")
 
@@ -65,18 +127,35 @@ class HardFilterEngine:
         self.latest_round = latest_row[0]
         self.latest_win_nums = np.array(latest_row[1:7], dtype=np.uint8)
         self.latest_win_id = latest_row[8]
-        
+
         # 역대 1등 조합 ID 배열
         self.past_win_ids = np.array([r[8] for r in self.history_rows if r[8] is not None], dtype=np.uint32)
 
-    def apply_filters(self, adjacent_block_size: int = 10000, dynamic_filters: dict = None) -> tuple:
+    def apply_filters(self, adjacent_block_size: int = 10000, dynamic_filters: Optional[Dict[str, bool]] = None) -> \
+    Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
-        Pure NumPy C-Backend를 통한 7중 기본 Hard Filter + 동적 패턴 필터(최대 6중) 동시 타격.
-        반환값: (survivor_indices, combos, comb_ids, zone_ids)
+        [v1.9] Pure NumPy C-Backend를 통한 7대 기본 Hard Filter 및 동적 패턴 필터(최대 6종) 동시 타격.
+
+        Args:
+            adjacent_block_size (int, optional): 직전 회차 ID 기준 배제할 전후 블록 크기 (기본값: 10000).
+            dynamic_filters (Optional[Dict[str, bool]], optional): Menu 2에서 활성화된 동적 필터 토글 딕셔너리.
+                - 'pair_ban': 3주 연속 이월 쌍 배제 (Filter 14)
+                - 'start_num_limit': 1구 16 이상 배제 (Filter 15)
+                - 'adjacent_limit': 이웃수 4개 이상 몰림 배제 (Filter 16)
+                - 'hyper_hot_ban': 단기 초과열 번호 2개 이상 배제 (Filter 17)
+                - 'end_num_limit': 6구 30 이하 배제 (Filter 18)
+                - 'hyper_hot_zone_ban': 10주 누적 초과열 Zone 배제 (Filter 19)
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+                - survivor_indices (np.ndarray): 1단계 생존 조합의 원본 인덱스 배열
+                - combos (np.ndarray): 814만 개 마스터 조합 2D 배열 (N, 6)
+                - comb_ids (np.ndarray): 조합 ID 1D 배열 (N,)
+                - zone_ids (np.ndarray): 조합별 구역 ID 1D 배열 (N,)
         """
         self._ensure_and_load_master_pool()
         self._fetch_history_data()
-        
+
         start_time = time.perf_counter()
         total_count = len(self.combos)
         print(f" - [연산] 순수 NumPy 1단계 벡터라이징 필터 엔진 가동 (대상: {total_count:,}건)")
@@ -85,11 +164,11 @@ class HardFilterEngine:
         # [기본 Filter 04] 당첨 이력 제외 (과거 1등 조합 영구 배제)
         # ---------------------------------------------------------
         mask_f04 = ~np.isin(self.comb_ids, self.past_win_ids)
-        
+
         # ---------------------------------------------------------
         # [기본 Filter 02] 인접 ID 블록 제외 (직전 당첨 ID 기준 앞뒤 N개 제외)
         # ---------------------------------------------------------
-        mask_f02 = ~((self.comb_ids >= self.latest_win_id - adjacent_block_size) & 
+        mask_f02 = ~((self.comb_ids >= self.latest_win_id - adjacent_block_size) &
                      (self.comb_ids <= self.latest_win_id + adjacent_block_size))
 
         # ---------------------------------------------------------
@@ -102,10 +181,10 @@ class HardFilterEngine:
         # [기본 Filter 08] 연속 번호 제한 (3연속 번호 출현 시 배제)
         # ---------------------------------------------------------
         mask_f08 = ~(
-            (self.combos[:, 2] - self.combos[:, 0] == 2) |
-            (self.combos[:, 3] - self.combos[:, 1] == 2) |
-            (self.combos[:, 4] - self.combos[:, 2] == 2) |
-            (self.combos[:, 5] - self.combos[:, 3] == 2)
+                (self.combos[:, 2] - self.combos[:, 0] == 2) |
+                (self.combos[:, 3] - self.combos[:, 1] == 2) |
+                (self.combos[:, 4] - self.combos[:, 2] == 2) |
+                (self.combos[:, 5] - self.combos[:, 3] == 2)
         )
 
         # ---------------------------------------------------------
@@ -125,7 +204,8 @@ class HardFilterEngine:
         # ---------------------------------------------------------
         # [기본 Filter 12] AC값(산술 복잡도) 필터 (유니크 차이값 기반 AC >= 7)
         # ---------------------------------------------------------
-        pairs = [(0,1), (0,2), (0,3), (0,4), (0,5), (1,2), (1,3), (1,4), (1,5), (2,3), (2,4), (2,5), (3,4), (3,5), (4,5)]
+        pairs = [(0, 1), (0, 2), (0, 3), (0, 4), (0, 5), (1, 2), (1, 3), (1, 4), (1, 5), (2, 3), (2, 4), (2, 5), (3, 4),
+                 (3, 5), (4, 5)]
         diffs = np.column_stack([self.combos[:, j] - self.combos[:, i] for i, j in pairs])
         sorted_diffs = np.sort(diffs, axis=1)
         unique_diff_counts = (np.diff(sorted_diffs, axis=1) > 0).sum(axis=1) + 1
@@ -206,10 +286,20 @@ class HardFilterEngine:
 
         return survivor_indices, self.combos, self.comb_ids, self.zone_ids
 
-    def _print_audit_report(self, total_count: int, survivor_count: int, elapsed: float):
-        """Hard Filter 연산 결과 통계 리포트"""
+    def _print_audit_report(self, total_count: int, survivor_count: int, elapsed: float) -> None:
+        """
+        [v1.9] Hard Filter 연산 결과 통계 리포트 콘솔 출력.
+
+        Args:
+            total_count (int): 초기 대상 조합 수 (8,145,060건).
+            survivor_count (int): 필터를 통과한 생존 조합 수.
+            elapsed (float): 순수 벡터 연산 소요 시간(초).
+
+        Returns:
+            None
+        """
         drop_rate = (total_count - survivor_count) / total_count * 100
-        
+
         print("\n" + "=" * 60)
         print(f"[Phase 2] Hard Filter 연산 리포트")
         print("=" * 60)
@@ -219,8 +309,18 @@ class HardFilterEngine:
         print(f" - 순수 벡터 연산 : {elapsed:.3f} 초")
         print("=" * 60)
 
-    def close(self):
-        self.conn.close()
+    def close(self) -> None:
+        """
+        [v1.9] 데이터베이스 커넥션 자원 명시적 반환.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if self.conn:
+            self.conn.close()
 
 
 if __name__ == "__main__":
