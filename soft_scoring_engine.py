@@ -1,14 +1,16 @@
 """
 Module: soft_scoring_engine.py
-Version: 1.9
-Last Updated: 2026-09-11
+Version: 2.1
+Last Updated: 2026-10-07
 
 [모듈 책임]
 - 1단계 생존 조합 대상 6대 Soft Scoring 가중치(100점 만점) C-레벨 벡터 채점 수행.
 - 최근 10회차 기반 장기 미출현수(Cold Numbers) 및 중앙값 이하 미출현 구역(Cold Zones) 동적 산출.
-- 상호 배타적 4단계 우선순위 큐(0순위: 마스킹 -> 1순위: 고정수 -> 2순위: 우대Zone -> 3순위: AI다각화) 파티셔닝.
+- 상호 배타적 3단계 우선순위 큐(0순위: 마스킹 원천차단 -> 1순위: 지정 고정수 -> 2순위: 우량 풀 통합 Pure Shuffle) 파티셔닝.
 - Random Noise 기반 동점자 무작위 정렬, np.random.choice 비복원 층화 추출 및 잔여 잉여량 무작위 배정.
 - WEEKLY_AUDIT_LOG 적재 및 predictions/ 폴더 내 단일 통합 TXT/CSV 리빌드 파일 출력.
+- [UI 개선] 독립 실행 시 짝수 행 노란색(ANSI Yellow) 교차 하이라이트 지원.
+- [대용량 안전 모드] 100게임 이하 전량 콘솔 출력, 100게임 초과 시 상위/하위 요약 출력 및 CMD 렌더링 버퍼 보호.
 """
 import sqlite3
 import numpy as np
@@ -31,12 +33,12 @@ SCORE_CUTOFF = 70.0
 
 class SoftScoringEngine:
     """
-    [v1.9] 2단계 가중치 평가 및 3단계 확률론적 층화 다각화 추출 엔진.
+    [v2.1] 2단계 가중치 평가 및 3단계 확률론적 층화 다각화 추출 엔진.
     """
 
     def __init__(self, db_path: str = DB_NAME):
         """
-        [v1.9] SoftScoringEngine 초기화 및 DB 커넥션, 출력 폴더 설정.
+        [v2.1] SoftScoringEngine 초기화 및 DB 커넥션, 출력 폴더 설정.
 
         Args:
             db_path (str): SQLite 데이터베이스 파일 경로.
@@ -53,7 +55,7 @@ class SoftScoringEngine:
 
     def _analyze_recent_history(self, lookback_rounds: int = 10) -> Tuple[np.ndarray, np.ndarray, int]:
         """
-        [v1.9] 최근 N회차 당첨 데이터를 기반으로 장기 미출현수(Cold) 및 콜드 구역(Cold Zone) 동적 산출.
+        [v2.1] 최근 N회차 당첨 데이터를 기반으로 장기 미출현수(Cold) 및 콜드 구역(Cold Zone) 동적 산출.
 
         - Cold Numbers: 최근 N회차 동안 1회도 등장하지 않은 미출현 번호군.
         - Cold Zones: 최근 N회차 구역별 출현 빈도가 중앙값(Median) 이하인 비과열 구역군.
@@ -110,7 +112,7 @@ class SoftScoringEngine:
                         user_bonus_score_zones: Optional[List[int]] = None) -> Tuple[
         np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
         """
-        [v1.9] NumPy C-Backend 벡터 연산으로 1단계 생존 조합 6대 항목 가중치 채점.
+        [v2.1] NumPy C-Backend 벡터 연산으로 1단계 생존 조합 6대 항목 가중치 채점.
 
         Args:
             survivor_indices (np.ndarray): 1단계 생존 조합 인덱스 배열.
@@ -118,7 +120,7 @@ class SoftScoringEngine:
             comb_ids (np.ndarray): 전체 조합 고유 ID 1D 배열 (N,).
             zone_ids (np.ndarray): 전체 조합 Zone ID 1D 배열 (N,).
             user_excluded_zones (Optional[List[int]], optional): -100점 패널티 부여 대상 구역 목록 (Menu 6).
-            user_bonus_score_zones (Optional[List[int]], optional): +20점 단순 가점 대상 구역 목록 (Menu 7).
+            user_bonus_score_zones (Optional[List[int]], optional): +20점 단순 가점 부여 대상 구역 목록 (Menu 7).
 
         Returns:
             Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
@@ -182,27 +184,25 @@ class SoftScoringEngine:
 
     def extract_top_recommendations(self, scores: np.ndarray, surv_combos: np.ndarray, surv_ids: np.ndarray,
                                     surv_zones: np.ndarray,
-                                    user_bonus_quota_zones: Optional[List[int]] = None, output_count: int = 10,
+                                    output_count: int = 10,
                                     user_manual_nums: Optional[List[int]] = None, user_manual_count: int = 0,
                                     user_manual_mode: int = 0,
                                     user_exclude_nums: Optional[List[int]] = None, user_exclude_mode: int = 0,
                                     append_mode: bool = False, target_round: int = 0) -> Tuple[
         np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
-        [v1.9] 70점 컷오프 및 우선순위 파티셔닝 층화 추출 엔진.
+        [v2.1] 70점 컷오프 및 우선순위 파티셔닝 층화 추출 엔진.
 
         상호 배타적 우선순위 큐:
           0순위: 누적 추출(Append) 기출력 ID 및 수동 제외수 마스킹
           1순위: 수동 고정수 부분공간 무작위 선별 (원칙: 70점 이상 / 실용: 차상위 강제)
-          2순위: 우대 Zone 구조적 할당 (잔여량의 최대 30%, max(1, int(rem * 0.3)))
-          3순위: 잔여 예산 자연 Cold Zone 무작위 균등 분산 (잉여 몫 비복원 추첨 배정)
+          2순위: 70점 이상 전체 우량 조합 풀 대상 확률적 완전 무작위 셔플 (Pure Shuffle)
 
         Args:
             scores (np.ndarray): 채점 완료된 점수 배열.
             surv_combos (np.ndarray): 생존 조합 번호 2D 배열.
             surv_ids (np.ndarray): 생존 조합 ID 1D 배열.
             surv_zones (np.ndarray): 생존 조합 Zone 1D 배열.
-            user_bonus_quota_zones (Optional[List[int]], optional): 구조적 30% 할당 대상 구역 (Menu 8).
             output_count (int, optional): 목표 추출 게임 수 (기본값: 10).
             user_manual_nums (Optional[List[int]], optional): 수동 고정수 목록 (Menu 9/10).
             user_manual_count (int, optional): 고정수 할당 요청 게임 수.
@@ -221,7 +221,7 @@ class SoftScoringEngine:
         candidate_count = np.count_nonzero(cutoff_mask)
 
         print("\n" + "=" * 60)
-        print(f"[Phase 3] 무작위 다각화 파티셔닝 추출 (목표: {output_count}게임)")
+        print(f"[Phase 3] 무작위 다각화 파티셔닝 추출 (목표: {output_count:,}게임)")
         print("=" * 60)
         print(f" - 채점 대상 풀   : {len(scores):,} 개")
         print(f" - {SCORE_CUTOFF}점 이상 후보 : {candidate_count:,} 개 ({candidate_count / len(scores) * 100:.2f}%)")
@@ -243,10 +243,10 @@ class SoftScoringEngine:
                 cursor.close()
 
             if prev_ids:
-                print(f" - [0순위: 중복 배제] 기 추출된 {len(prev_ids)}개 조합이 중복 추출되지 않도록 영구 차단합니다.")
+                print(f" - [0순위: 중복 배제] 기 추출된 {len(prev_ids):,}개 조합이 중복 추출되지 않도록 영구 차단합니다.")
                 already_extracted_mask = np.isin(surv_ids, prev_ids)
                 used_mask |= already_extracted_mask
-                print(f"   -> 성공: 기존 발급된 {np.count_nonzero(already_extracted_mask)}개 조합을 대상 풀에서 격리 완료.")
+                print(f"   -> 성공: 기존 발급된 {np.count_nonzero(already_extracted_mask):,}개 조합을 대상 풀에서 격리 완료.")
 
         # -------------------------------------------------------------
         # [우선순위 0순위 - B] 제외수 Global Mask 적용
@@ -265,7 +265,7 @@ class SoftScoringEngine:
         # [우선순위 1순위] 수동 고정수 부분공간 무작위 파티셔닝
         # -------------------------------------------------------------
         if user_manual_nums and user_manual_count > 0:
-            print(f" - [1순위: 수동 할당] 고정수 {user_manual_nums} 보유 부분공간 맵핑 중...")
+            print(f" - [1순위: 수동 할당] 고정수 {user_manual_nums} 보유 부분공간 매핑 중...")
             manual_mask = np.ones(len(surv_combos), dtype=bool)
             for num in user_manual_nums:
                 manual_mask &= np.any(surv_combos == num, axis=1)
@@ -291,77 +291,35 @@ class SoftScoringEngine:
                     sorted_manual_indices = valid_manual_indices[sorted_idx]
 
                     take_count = min(user_manual_count, len(sorted_manual_indices), output_count)
-                    # 등간격(Step) 슬라이싱 폐기 -> 상위 N개 무작위 표본 추출 반영 완료
                     sampled_manual = sorted_manual_indices[:take_count]
 
                     selected_indices.extend(sampled_manual)
                     used_mask[sampled_manual] = True
-                    print(f"   -> 성공: 수동 고정수 그룹에서 {len(sampled_manual)}게임 무작위 할당 완료")
+                    print(f"   -> 성공: 수동 고정수 그룹에서 {len(sampled_manual):,}게임 무작위 할당 완료")
 
         # -------------------------------------------------------------
-        # [우선순위 2순위] 우대 Zone 구조적 할당 (Stochastic 셔플링)
-        # -------------------------------------------------------------
-        rem_quota = output_count - len(selected_indices)
-        if user_bonus_quota_zones and rem_quota > 0:
-            max_bonus_quota = max(1, int(rem_quota * 0.3))
-            print(f" - [2순위: 우대 할당] 잔여 예산 기준 우대 Zone 최대 {max_bonus_quota}게임 주입 시도...")
-
-            bonus_mask = np.isin(surv_zones, user_bonus_quota_zones)
-            valid_bonus_mask = bonus_mask & (scores >= SCORE_CUTOFF) & ~used_mask
-            valid_bonus_indices = np.where(valid_bonus_mask)[0]
-
-            if len(valid_bonus_indices) > 0:
-                bonus_scores = scores[valid_bonus_indices]
-                noise = np.random.rand(len(bonus_scores)) * 1e-5
-                sorted_idx = np.argsort(-(bonus_scores + noise))
-                sorted_bonus_indices = valid_bonus_indices[sorted_idx]
-
-                take_count = min(max_bonus_quota, len(sorted_bonus_indices))
-                sampled_bonus = sorted_bonus_indices[:take_count]
-
-                selected_indices.extend(sampled_bonus)
-                used_mask[sampled_bonus] = True
-                print(f"   -> 성공: 우대 Zone에서 {len(sampled_bonus)}게임 무작위 할당 완료")
-
-        # -------------------------------------------------------------
-        # [우선순위 3순위] AI 자연 우량 조합 균등 분산 무작위 할당
+        # [우선순위 2순위] AI 점수 통합 기반 완전 무작위 다각화 셔플 (Pure Shuffle)
         # -------------------------------------------------------------
         rem_quota = output_count - len(selected_indices)
         if rem_quota > 0:
-            top_tier_mask = (scores == max_score) & ~used_mask
+            # 70점 컷오프 이상을 통과한 '전체 순수 우량 풀' 통합
+            top_tier_mask = (scores >= SCORE_CUTOFF) & ~used_mask
             top_tier_indices = np.where(top_tier_mask)[0]
 
-            # 최상위 점수 풀이 부족하면 컷오프 통과 풀 전체로 확장
-            if len(top_tier_indices) < rem_quota:
-                top_tier_mask = (scores >= SCORE_CUTOFF) & ~used_mask
-                top_tier_indices = np.where(top_tier_mask)[0]
+            if len(top_tier_indices) > 0:
+                print(f" - [2순위: 통합 셔플] 통과된 우량 조합 풀 {len(top_tier_indices):,}개 대상 잔여 {rem_quota:,}게임 완전 무작위 셔플링...")
 
-            top_zones = surv_zones[top_tier_indices]
-            unique_zones = np.unique(top_zones)
+                # 잔여 요구량이 통과 가능한 풀보다 적으면 층화 무작위 추출 (가점 Zone이 포함된 고득점자가 유리)
+                if len(top_tier_indices) >= rem_quota:
+                    sampled = np.random.choice(top_tier_indices, size=rem_quota, replace=False)
+                    selected_indices.extend(sampled)
+                    used_mask[sampled] = True
+                else:
+                    # 통과 풀을 다 털어 넣어도 부족한 경우 전량 긁어모음
+                    selected_indices.extend(top_tier_indices)
+                    used_mask[top_tier_indices] = True
 
-            if len(unique_zones) > 0:
-                print(f" - [3순위: AI 다각화] 잔여 {rem_quota}게임 -> 자연 우량 {len(unique_zones)}개 구역 무작위 균등 분산 배치 중...")
-
-                num_zones = len(unique_zones)
-                quota_per_zone = rem_quota // max(1, num_zones)
-                remainder = rem_quota % max(1, num_zones)
-
-                # [편향 방어] 잉여 할당(+1)을 부여받을 Zone 인덱스를 무작위 비복원 추출
-                bonus_zone_indices = set(
-                    np.random.choice(num_zones, size=remainder, replace=False)) if remainder > 0 else set()
-
-                for i, z in enumerate(unique_zones):
-                    z_indices = top_tier_indices[top_zones == z]
-                    take_count = quota_per_zone + (1 if i in bonus_zone_indices else 0)
-                    take_count = min(take_count, len(z_indices))
-
-                    if len(z_indices) > 0 and take_count > 0:
-                        # 결정론적 [::step] 폐기 -> 완벽한 np.random.choice 비복원 랜덤 추출
-                        sampled = np.random.choice(z_indices, size=take_count, replace=False)
-                        selected_indices.extend(sampled)
-                        used_mask[sampled] = True
-
-            # 3순위 분산 후에도 목표 게임 수가 부족한 경우 잔여 게임 무작위 채우기
+        # 2순위 셔플 후에도 목표 게임 수가 부족한 경우 잔여 게임 무작위 채우기
             if len(selected_indices) < output_count:
                 need = output_count - len(selected_indices)
                 remains = np.where((scores >= SCORE_CUTOFF) & ~used_mask)[0]
@@ -376,8 +334,8 @@ class SoftScoringEngine:
                     need = output_count - len(selected_indices)
 
                     # 70점 미만 컷오프 붕괴 보충 (실용주의 모드)
-                    if need > 0 and (user_exclude_mode == 2 or user_manual_mode == 2):
-                        print(f"   -> [주의] '실용(강제추출)' 모드 규정에 따라 70점 미만 풀에서 {need}게임 무작위 보충합니다.")
+                    if need > 0 and user_exclude_mode != 1 and user_manual_mode != 1:
+                        print(f"   -> [주의] 예산 달성({output_count:,}게임)을 위해 70점 미만 풀에서 {need:,}게임 무작위 추출하여 보충합니다.")
                         fallback_remains = np.where(~used_mask)[0]
                         fallback_scores = scores[fallback_remains]
 
@@ -397,7 +355,7 @@ class SoftScoringEngine:
     def export_and_log(self, top_combos: np.ndarray, top_ids: np.ndarray, top_zones: np.ndarray, top_scores: np.ndarray,
                        target_round: int, output_count: int = 10, append_mode: bool = False) -> None:
         """
-        [v1.9] 최종 추천 번호 WEEKLY_AUDIT_LOG 적재 및 predictions/ 폴더 내 단일 통합 파일(TXT, CSV) 리빌드 출력.
+        [v2.1] 최종 추천 번호 WEEKLY_AUDIT_LOG 적재 및 predictions/ 폴더 내 단일 통합 파일(TXT, CSV) 리빌드 출력.
 
         Args:
             top_combos (np.ndarray): 최종 선별된 조합 번호 배열 (N, 6).
@@ -466,7 +424,7 @@ class SoftScoringEngine:
             for idx, r in enumerate(all_records):
                 zone_id = r[8] if r[8] else 0
                 label = chr(65 + (idx % 26)) + (str(idx // 26) if idx >= 26 else "")
-                f.write(f"게임 {label:<3} : [{r[0]:02d}, {r[1]:02d}, {r[2]:02d}, "
+                f.write(f"게임 {label:<5} : [{r[0]:02d}, {r[1]:02d}, {r[2]:02d}, "
                         f"{r[3]:02d}, {r[4]:02d}, {r[5]:02d}] "
                         f"(ID: {r[6]:>7} | Zone: {zone_id:>2} | 점수: {float(r[7]):.1f}점)\n")
             f.write("===========================================================\n")
@@ -479,11 +437,11 @@ class SoftScoringEngine:
                 f.write(f"{label},{r[0]},{r[1]},{r[2]},{r[3]},{r[4]},{r[5]},{r[6]},{zone_id},{r[7]:.1f}\n")
 
         print("\n - [DB 감사 로그] 신규 추출 조합 동기화 완료.")
-        print(f" -> TXT/CSV 통합 출력 완료 : 총 {total_count}개 누적 게임이 하나의 파일에 기록되었습니다.")
+        print(f" -> TXT/CSV 통합 출력 완료 : 총 {total_count:,}개 누적 게임이 하나의 파일에 기록되었습니다.")
 
     def close(self) -> None:
         """
-        [v1.9] 데이터베이스 커넥션 자원 명시적 반환.
+        [v2.1] 데이터베이스 커넥션 자원 명시적 반환.
 
         Args:
             None
@@ -496,6 +454,8 @@ class SoftScoringEngine:
 
 
 if __name__ == "__main__":
+    if os.name == 'nt':
+        os.system('color')
     print("=" * 60)
     print("[엔드투엔드 파이프라인] Pure NumPy Hard Filter -> Soft Scoring 가동")
     print("=" * 60)
@@ -519,14 +479,33 @@ if __name__ == "__main__":
         )
         scoring_engine.export_and_log(top_combos, top_ids, top_zones, top_scores, target_round, default_output_count)
 
+        total_extracted = len(top_combos)
         print("\n" + "=" * 60)
-        print(f" [제 {target_round}회차 최종 선별된 최상위 {default_output_count}게임 (Cold Zone 최적 배분)]")
+        print(f" [제 {target_round}회차 최종 선별된 최상위 {total_extracted:,}게임 (Cold Zone 최적 배분)]")
         print("=" * 60)
-        for idx in range(len(top_combos)):
+
+        def print_line(idx: int) -> None:
             c = top_combos[idx]
-            print(f" 게임 {chr(65 + idx)} : [{int(c[0]):02d}, {int(c[1]):02d}, {int(c[2]):02d}, "
-                  f"{int(c[3]):02d}, {int(c[4]):02d}, {int(c[5]):02d}] "
-                  f"| Zone {int(top_zones[idx]):>2} | 점수: {float(top_scores[idx]):.1f}점")
+            label = chr(65 + (idx % 26)) + (str(idx // 26) if idx >= 26 else "")
+            line_str = (f" 게임 {label:<5} : [{int(c[0]):02d}, {int(c[1]):02d}, {int(c[2]):02d}, "
+                        f"{int(c[3]):02d}, {int(c[4]):02d}, {int(c[5]):02d}] "
+                        f"| Zone {int(top_zones[idx]):>2} | 점수: {float(top_scores[idx]):.1f}점")
+            if idx % 2 == 1:
+                print(f"\033[93m{line_str}\033[0m")
+            else:
+                print(line_str)
+
+        if total_extracted <= 100:
+            for idx in range(total_extracted):
+                print_line(idx)
+        else:
+            print(f" [대량 데이터 모드: 총 {total_extracted:,}게임 중 상위 10게임 및 하위 5게임 요약 출력]")
+            for idx in range(10):
+                print_line(idx)
+            print(f"  ... [중간 {total_extracted - 15:,}개 게임 화면 출력 생략] ...")
+            for idx in range(total_extracted - 5, total_extracted):
+                print_line(idx)
+
         print("=" * 60)
         print(f" -> 전체 파이프라인 총 소요 시간: {time.perf_counter() - total_start:.2f}초")
         print("=" * 60)
