@@ -1,7 +1,7 @@
 """
 Module: main.py
-Version: 1.9
-Last Updated: 2026-09-11
+Version: 2.2
+Last Updated: 2026-10-07
 
 [모듈 책임]
 - LOTTO 6/45 시스템의 단일 진입점(Entry Point) 및 15-Way CLI 오케스트레이션.
@@ -9,6 +9,9 @@ Last Updated: 2026-09-11
 - 최근 5~10회차 당첨 패턴 실시간 진단 및 동적 하드필터 토글 콘솔 제공.
 - 오프라인 CSV 및 온라인 동행복권 실시간 벌크 크롤러(fetch_winning_history) 분기 동기화.
 - 당해 회차 추천 이력 감지 시 신규/누적(Append) 분기 제어 및 과거 추천 조합 복구 조회.
+- [UI 개선] 추천 번호 및 과거 조회 출력 시 짝수 행 노란색(ANSI Yellow) 교차 하이라이트 지원.
+- [UI 개선] 2번 패턴 분석 리포트의 주요 통계 수치값 및 [ON] 스위치 상태 노란색 하이라이트 지원.
+- [대용량 안전 모드] 100게임 이하 전량 콘솔 출력, 100게임 초과 시 상위/하위 요약 출력 및 CMD 렌더링 버퍼 보호.
 """
 import sys
 import os
@@ -30,7 +33,8 @@ DB_NAME = os.path.join(BASE_DIR, "lotto.db")
 
 def pattern_analyzer_menu(dynamic_filters: Dict[str, bool]) -> None:
     """
-    [v1.9] 최근 5~10회차 당첨 패턴을 실시간 정밀 진단하고 6대 동적 하드필터를 토글하는 대화형 콘솔.
+    [v2.2] 최근 5~10회차 당첨 패턴을 실시간 정밀 진단하고 6대 동적 하드필터를 토글하는 대화형 콘솔.
+    - [UI] 진단 결과의 주요 번호/구역 리스트 및 [ON] 활성화 상태를 노란색(ANSI Yellow)으로 시각 강조.
 
     Args:
         dynamic_filters (Dict[str, bool]): 세션에 유지 중인 6대 동적 필터 상태 딕셔너리.
@@ -106,62 +110,73 @@ def pattern_analyzer_menu(dynamic_filters: Dict[str, bool]) -> None:
 
             # 1. 3주 연속 이월 쌍 딜레마
             if len(common_pairs) >= 2:
-                print(f" ● [위험] 직전 2회차 연속 동반 출현 쌍 발견: {sorted(list(common_pairs))}")
+                pairs_hl = f"\033[1;93m{sorted(list(common_pairs))}\033[0m"
+                print(f" ● \033[1;91m[위험]\033[0m 직전 2회차 연속 동반 출현 쌍 발견: {pairs_hl}")
                 print("   ※ 직전 2주 연속으로 함께 나온 번호쌍이 이번 주에 또 같이 나올 확률은 0에 수렴하므로 차단 권장")
             else:
-                print(f" ● [안전] 직전 2회차 연속 동반 출현 쌍 없음 (현재 교집합: {sorted(list(common_pairs))})")
+                pairs_hl = f"\033[1;93m{sorted(list(common_pairs))}\033[0m"
+                print(f" ● \033[1;92m[안전]\033[0m 직전 2회차 연속 동반 출현 쌍 없음 (현재 교집합: {pairs_hl})")
                 print("   ※ 2주 연속 겹친 번호쌍이 없으므로 안전한 분산 상태입니다.")
 
             # 2. 1구 트렌드 분석
-            print(f" ● [경향] 최근 5주 1구(시작) 번호 트렌드: {start_nums}")
+            start_nums_hl = f"\033[1;93m{start_nums}\033[0m"
+            print(f" ● \033[1;96m[경향]\033[0m 최근 5주 1구(시작) 번호 트렌드: {start_nums_hl}")
             if max(start_nums) >= 16:
                 print("   ※ 첫 번호가 16부터 시작하는 희귀 조합(역대 7.3%)이 관측되었습니다. 1구 16 이상 컷오프 권장")
             else:
                 print("   ※ 첫 번호가 1~15 정상 주류 구간 내에서 안정적으로 시작되고 있습니다.")
 
             # 3. 6구 트렌드 분석
-            print(f" ● [경향] 최근 5주 6구(끝) 번호 트렌드  : {end_nums}")
+            end_nums_hl = f"\033[1;93m{end_nums}\033[0m"
+            print(f" ● \033[1;96m[경향]\033[0m 최근 5주 6구(끝) 번호 트렌드  : {end_nums_hl}")
             if min(end_nums) <= 30:
                 print("   ※ 마지막 번호가 30 이하로 끝나는 희귀 조합(역대 7.3%)이 관측되었습니다. 6구 30 이하 컷오프 권장")
             else:
                 print("   ※ 마지막 번호가 31~45 고번호 영역에서 정상적으로 마감되고 있습니다.")
 
             # 4. 이웃수 풀 분석
-            print(f" ● [정보] 직전 회차 파생 이웃수 풀: {sorted(list(neighbors))} (총 {len(neighbors)}개)")
+            neighbors_hl = f"\033[1;93m{sorted(list(neighbors))}\033[0m"
+            neighbors_cnt_hl = f"\033[1;93m{len(neighbors)}개\033[0m"
+            print(f" ● \033[1;96m[정보]\033[0m 직전 회차 파생 이웃수 풀: {neighbors_hl} (총 {neighbors_cnt_hl})")
             print("   ※ 직전 당첨번호 바로 옆 번호가 다음 회차에 4개 이상 몰려 나오는 억지 패턴 컷오프 권장")
 
             # 5. 단기 번호 Hyper-Hot 분석
             if hyper_hot:
-                print(f" ● [경고] 단기 과열(최근 5주 3회 이상) 번호 발견: {sorted(hyper_hot)}")
+                hyper_hot_hl = f"\033[1;93m{sorted(hyper_hot)}\033[0m"
+                print(f" ● \033[1;93m[경고]\033[0m 단기 과열(최근 5주 3회 이상) 번호 발견: {hyper_hot_hl}")
                 print("   ※ 최근 5주간 너무 자주 나온 번호들이 한 게임에 2개 이상 뭉쳐서 나오는 현상 컷오프 권장")
             else:
-                print(" ● [안정] 최근 5주 기준 단기 초과열 번호 없음.")
+                print(" ● \033[1;92m[안정]\033[0m 최근 5주 기준 단기 초과열 번호 없음.")
                 print("   ※ 특정 번호의 극단적인 단기 쏠림 없이 고르게 출현하고 있습니다.")
 
             # 6. 10주 구역(Zone) Hyper-Hot 분석
             if hyper_hot_zones and len(history) >= 10:
-                print(f" ● [과열] 10주간 3회 이상 출현한 초과열 Zone 발견: Zone {sorted(hyper_hot_zones)}")
+                hyper_zones_hl = f"\033[1;93mZone {sorted(hyper_hot_zones)}\033[0m"
+                print(f" ● \033[1;91m[과열]\033[0m 10주간 3회 이상 출현한 초과열 Zone 발견: {hyper_zones_hl}")
                 print("   ※ 10주간 3번 이상 터져 평균회귀에 진입한 과열 구역의 81만개 조합 통째로 컷오프 권장")
             elif len(history) >= 10:
-                print(" ● [안정] 10주 기준 초과열 Zone(3회 이상 출현) 없음.")
+                print(" ● \033[1;92m[안정]\033[0m 10주 기준 초과열 Zone(3회 이상 출현) 없음.")
                 print("   ※ 10개 구역 전체가 통계적 기대치 범위 내에서 균등 순환 중입니다.")
 
             print("-" * 80)
             print(" [동적 하드필터 적용 스위치 - 번호를 입력하여 ON/OFF 토글]")
 
-            st_1 = "[ON]" if dynamic_filters.get('pair_ban') else "[OFF]"
-            st_2 = "[ON]" if dynamic_filters.get('start_num_limit') else "[OFF]"
-            st_3 = "[ON]" if dynamic_filters.get('end_num_limit') else "[OFF]"
-            st_4 = "[ON]" if dynamic_filters.get('adjacent_limit') else "[OFF]"
-            st_5 = "[ON]" if dynamic_filters.get('hyper_hot_ban') else "[OFF]"
-            st_6 = "[ON]" if dynamic_filters.get('hyper_hot_zone_ban') else "[OFF]"
+            def get_switch_badge(is_on: bool) -> str:
+                return "\033[1;93m[ON]\033[0m " if is_on else "[OFF]"
 
-            print(f"  [1](현재: {st_1:<5}) 3주 연속 이월 쌍 제외")
-            print(f"  [2](현재: {st_2:<5}) 시작 번호(1구) 16 이상 배제")
-            print(f"  [3](현재: {st_3:<5}) 끝 번호(6구) 30 이하 배제")
-            print(f"  [4](현재: {st_4:<5}) 직전 회차 이웃수 4개 이상 배제")
-            print(f"  [5](현재: {st_5:<5}) 단기 초과열 번호 2개 이상 배제")
-            print(f"  [6](현재: {st_6:<5}) 10주 누적 초과열 Zone 배제")
+            st_1 = get_switch_badge(dynamic_filters.get('pair_ban', False))
+            st_2 = get_switch_badge(dynamic_filters.get('start_num_limit', False))
+            st_3 = get_switch_badge(dynamic_filters.get('end_num_limit', False))
+            st_4 = get_switch_badge(dynamic_filters.get('adjacent_limit', False))
+            st_5 = get_switch_badge(dynamic_filters.get('hyper_hot_ban', False))
+            st_6 = get_switch_badge(dynamic_filters.get('hyper_hot_zone_ban', False))
+
+            print(f"  [1](현재: {st_1}) 3주 연속 이월 쌍 제외")
+            print(f"  [2](현재: {st_2}) 시작 번호(1구) 16 이상 배제")
+            print(f"  [3](현재: {st_3}) 끝 번호(6구) 30 이하 배제")
+            print(f"  [4](현재: {st_4}) 직전 회차 이웃수 4개 이상 배제")
+            print(f"  [5](현재: {st_5}) 단기 초과열 번호 2개 이상 배제")
+            print(f"  [6](현재: {st_6}) 10주 누적 초과열 Zone 배제")
             print("  [0] 분석 메뉴 종료 및 메인으로 돌아가기")
             print("=" * 80)
 
@@ -194,7 +209,6 @@ def pattern_analyzer_menu(dynamic_filters: Dict[str, bool]) -> None:
 
 def run_prediction_pipeline(user_excluded_zones: Optional[List[int]] = None,
                             user_bonus_score_zones: Optional[List[int]] = None,
-                            user_bonus_quota_zones: Optional[List[int]] = None,
                             output_count: int = 10,
                             user_manual_nums: Optional[List[int]] = None,
                             user_manual_count: int = 0,
@@ -204,12 +218,13 @@ def run_prediction_pipeline(user_excluded_zones: Optional[List[int]] = None,
                             append_mode: bool = False,
                             dynamic_filters: Optional[Dict[str, bool]] = None) -> None:
     """
-    [v1.9] 1단계 Hard Filter 및 2/3단계 Soft Scoring 파이프라인 일괄 가동 함수.
+    [v2.2] 1단계 Hard Filter 및 2/3단계 Soft Scoring 파이프라인 일괄 가동 함수.
+    - [UI] 짝수 번째 행(B, D, F...)을 노란색(ANSI \\033[93m)으로 하이라이트하여 로또 마킹 시인성 극대화.
+    - [대용량 모드] 100게임 이하 전량 출력, 100게임 초과 시 상위 10게임 및 하위 5게임 요약 출력(CMD 오버플로 방지).
 
     Args:
         user_excluded_zones (Optional[List[int]]): -100점 패널티 부여 Zone 목록.
         user_bonus_score_zones (Optional[List[int]]): +20점 단순 가점 부여 Zone 목록.
-        user_bonus_quota_zones (Optional[List[int]]): 구조적 30% 할당 주입 Zone 목록.
         output_count (int): 목표 추출 게임 수.
         user_manual_nums (Optional[List[int]]): 수동 고정수 목록.
         user_manual_count (int): 고정수 할당 요청 게임 수.
@@ -227,24 +242,22 @@ def run_prediction_pipeline(user_excluded_zones: Optional[List[int]] = None,
 
     print("\n" + "=" * 65)
     mode_title = "누적 추가 추출(Append)" if append_mode else "신규 추출"
-    print(f" [시스템 가동] 로또 6/45 AI 최적화 추천 파이프라인 ({mode_title} / 목표: {output_count}게임)")
+    print(f" [시스템 가동] 로또 6/45 AI 최적화 추천 파이프라인 ({mode_title} / 목표: {output_count:,}게임)")
 
     # 활성화된 동적 하드필터 내역 출력
     active_dyn = [k for k, v in dynamic_filters.items() if v]
     if active_dyn:
-        print(f" [동적 제어] 활성화된 패턴 분석 하드필터: {len(active_dyn)}개 가동 중")
+        print(f" [동적 제어] 활성화된 패턴 분석 하드필터: \033[1;93m{len(active_dyn)}개\033[0m 가동 중")
     if user_excluded_zones:
-        print(f" [수동 제어 6번] 영구 제외 Zone (-100점 페널티): {user_excluded_zones}")
+        print(f" [수동 제어 6번] 영구 제외 Zone (-100점 페널티): \033[1;93m{user_excluded_zones}\033[0m")
     if user_bonus_score_zones:
-        print(f" [수동 제어 7번] 우대 Zone 단순 가점 (+20점 부여): {user_bonus_score_zones}")
-    if user_bonus_quota_zones:
-        print(f" [수동 제어 8번] 우대 Zone 구조적 할당 (최대 30% 주입): {user_bonus_quota_zones}")
+        print(f" [수동 제어 7번] 우대 Zone 단순 가점 (+20점 부여): \033[1;93m{user_bonus_score_zones}\033[0m")
     if user_manual_nums and user_manual_count > 0:
         mode_str = "원칙주의(70점 컷오프)" if user_manual_mode == 1 else "실용주의(점수 무시 강제 추출)"
-        print(f" [수동 제어 9/10번] 고정수 {user_manual_nums} -> {user_manual_count}게임 할당 ({mode_str})")
+        print(f" [수동 제어 8/9번] 고정수 \033[1;93m{user_manual_nums}\033[0m -> \033[1;93m{user_manual_count:,}게임\033[0m 할당 ({mode_str})")
     if user_exclude_nums:
         mode_str = "원칙주의(70점 컷오프 유지)" if user_exclude_mode == 1 else "실용주의(미달 시 강제 보충)"
-        print(f" [수동 제어 11/12번] 제외수 {user_exclude_nums} 원천 배제 ({mode_str})")
+        print(f" [수동 제어 10/11번] 제외수 \033[1;93m{user_exclude_nums}\033[0m 원천 배제 ({mode_str})")
     print("=" * 65)
 
     start_total = time.perf_counter()
@@ -271,7 +284,7 @@ def run_prediction_pipeline(user_excluded_zones: Optional[List[int]] = None,
 
         top_combos, top_ids, top_zones, top_scores = scoring_engine.extract_top_recommendations(
             scores, surv_combos, surv_ids, surv_zones,
-            user_bonus_quota_zones, output_count,
+            output_count,
             user_manual_nums, user_manual_count, user_manual_mode,
             user_exclude_nums, user_exclude_mode,
             append_mode, target_round
@@ -280,16 +293,38 @@ def run_prediction_pipeline(user_excluded_zones: Optional[List[int]] = None,
         scoring_engine.export_and_log(top_combos, top_ids, top_zones, top_scores, target_round, output_count,
                                       append_mode)
 
+        total_extracted = len(top_combos)
         print("\n" + "=" * 65)
-        print(f" [제 {target_round}회차 신규 선별 {output_count}게임 (수동 제어 및 누적 적용 완료)]")
+        print(f" [제 {target_round}회차 신규 선별 {total_extracted:,}게임 (수동 제어 및 누적 적용 완료)]")
         print("=" * 65)
-        for idx in range(len(top_combos)):
+
+        def print_game_line(idx: int) -> None:
             c = top_combos[idx]
-            # 26게임 초과 시에도 라벨 깨짐 없는 포맷팅 적용 (A, B ... Z, A1, B1 ...)
             label = chr(65 + (idx % 26)) + (str(idx // 26) if idx >= 26 else "")
-            print(f" 게임 {label:<3} : [{int(c[0]):02d}, {int(c[1]):02d}, {int(c[2]):02d}, "
-                  f"{int(c[3]):02d}, {int(c[4]):02d}, {int(c[5]):02d}] "
-                  f"| Zone {int(top_zones[idx]):>2} | 점수: {float(top_scores[idx]):.1f}점")
+            line_str = (f" 게임 {label:<5} : [{int(c[0]):02d}, {int(c[1]):02d}, {int(c[2]):02d}, "
+                        f"{int(c[3]):02d}, {int(c[4]):02d}, {int(c[5]):02d}] "
+                        f"| Zone {int(top_zones[idx]):>2} | 점수: {float(top_scores[idx]):.1f}점")
+            if idx % 2 == 1:
+                print(f"\033[93m{line_str}\033[0m")
+            else:
+                print(line_str)
+
+        # 100게임 이하: 전체 출력 / 100게임 초과: 상위 10개 + 하위 5개 요약 출력
+        if total_extracted <= 100:
+            for idx in range(total_extracted):
+                print_game_line(idx)
+        else:
+            print(f" [대량 데이터 모드: 총 {total_extracted:,}게임 중 상위 10게임 및 하위 5게임 요약 출력]")
+            for idx in range(10):
+                print_game_line(idx)
+
+            print(f"  ... [중간 {total_extracted - 15:,}개 게임 화면 출력 생략 (I/O 버퍼 보호)] ...")
+
+            for idx in range(total_extracted - 5, total_extracted):
+                print_game_line(idx)
+
+            print(f"\n -> 전체 {total_extracted:,}게임 전체 내역은 predictions/lotto_recommendations_{target_round}회.txt/.csv 파일에 안전하게 저장되었습니다.")
+
         print("=" * 65)
         print(f" -> 파이프라인 총 소요 시간: {time.perf_counter() - start_total:.2f}초")
         print("=" * 65)
@@ -303,7 +338,7 @@ def run_prediction_pipeline(user_excluded_zones: Optional[List[int]] = None,
 
 def run_audit_pipeline() -> None:
     """
-    [v1.9] 지정 회차 실제 당첨 번호 사후 검증 (Recall & Precision Audit) 가동.
+    [v2.2] 지정 회차 실제 당첨 번호 사후 검증 (Recall & Precision Audit) 가동.
 
     Returns:
         None
@@ -336,7 +371,9 @@ def run_audit_pipeline() -> None:
 
 def view_past_recommendations() -> None:
     """
-    [v1.9] 지정 회차의 시스템 추천 내역을 DB에서 다시 조회하여 출력 (Read-Only).
+    [v2.2] 지정 회차의 시스템 추천 내역을 DB에서 다시 조회하여 출력 (Read-Only).
+    - [UI] 짝수 번째 행(B, D, F...)을 노란색(ANSI \\033[93m)으로 하이라이트하여 로또 마킹 시인성 극대화.
+    - [대용량 모드] 100게임 이하 전량 출력, 100게임 초과 시 상위 10게임 및 하위 5게임 요약 출력.
 
     Returns:
         None
@@ -397,15 +434,38 @@ def view_past_recommendations() -> None:
         if not rows:
             print(f"\n[알림] 제 {target_round}회차에 시스템이 생성한 추천 내역이 DB에 존재하지 않습니다.")
         else:
+            total_rows = len(rows)
             print("\n" + "=" * 65)
-            print(f" [제 {target_round}회차 시스템 최종 선별 추천 조합 복구 조회 (총 {len(rows)}게임)]")
+            print(f" [제 {target_round}회차 시스템 최종 선별 추천 조합 복구 조회 (총 {total_rows:,}게임)]")
             print("=" * 65)
-            for idx, r in enumerate(rows):
+
+            def print_row_line(idx: int) -> None:
+                r = rows[idx]
                 zone_id = r[7] if r[7] else 0
                 label = chr(65 + (idx % 26)) + (str(idx // 26) if idx >= 26 else "")
-                print(f" 게임 {label:<3} : [{r[0]:02d}, {r[1]:02d}, {r[2]:02d}, "
-                      f"{r[3]:02d}, {r[4]:02d}, {r[5]:02d}] "
-                      f"| Zone {zone_id:>2} | 점수: {float(r[6]):.1f}점")
+                line_str = (f" 게임 {label:<5} : [{r[0]:02d}, {r[1]:02d}, {r[2]:02d}, "
+                            f"{r[3]:02d}, {r[4]:02d}, {r[5]:02d}] "
+                            f"| Zone {zone_id:>2} | 점수: {float(r[6]):.1f}점")
+                if idx % 2 == 1:
+                    print(f"\033[93m{line_str}\033[0m")
+                else:
+                    print(line_str)
+
+            if total_rows <= 100:
+                for idx in range(total_rows):
+                    print_row_line(idx)
+            else:
+                print(f" [대량 데이터 모드: 총 {total_rows:,}게임 중 상위 10게임 및 하위 5게임 요약 출력]")
+                for idx in range(10):
+                    print_row_line(idx)
+
+                print(f"  ... [중간 {total_rows - 15:,}개 게임 화면 출력 생략 (I/O 버퍼 보호)] ...")
+
+                for idx in range(total_rows - 5, total_rows):
+                    print_row_line(idx)
+
+                print(f"\n -> 전체 {total_rows:,}게임 전체 내역은 predictions/lotto_recommendations_{target_round}회.txt/.csv 파일에서 확인하실 수 있습니다.")
+
             print("=" * 65)
 
     except Exception as e:
@@ -418,7 +478,7 @@ def view_past_recommendations() -> None:
 
 def handle_data_sync_menu() -> None:
     """
-    [v1.9 신규] 최신 당첨 이력 동기화 방식 선택 서브메뉴 (오프라인 CSV vs 온라인 크롤러).
+    [v2.2] 최신 당첨 이력 동기화 방식 선택 서브메뉴 (오프라인 CSV vs 온라인 크롤러).
 
     Returns:
         None
@@ -427,7 +487,7 @@ def handle_data_sync_menu() -> None:
     print(" [데이터 동기화] 최신 당첨 이력 ETL 방식 선택")
     print("=" * 60)
     print("  [1] 오프라인 CSV Bulk ETL (로컬 최신 .csv 파일 자동 감지)")
-    print("  [2] 온라인 동행복권 실시간 벌크 크롤러 (단일 HTTP 벌크 요청)")
+    print("  [2] 온라인 동행복권 실시간 벌크 크롤러 (신규 REST API)")
     print("  [0] 취소 및 메인 메뉴 복귀")
     print("=" * 60)
     sync_choice = input(" 동기화 방식을 선택하십시오 (0~2): ").strip()
@@ -444,7 +504,7 @@ def handle_data_sync_menu() -> None:
 
 def main_menu() -> None:
     """
-    [v1.9] 메인 CLI 인터페이스 라우터.
+    [v2.2] 메인 CLI 인터페이스 라우터.
 
     Returns:
         None
@@ -452,7 +512,6 @@ def main_menu() -> None:
     user_budget = 10000
     user_excluded_zones = []
     user_bonus_score_zones = []
-    user_bonus_quota_zones = []
     user_manual_nums = []
     user_manual_count = 0
     user_manual_mode = 0
@@ -477,50 +536,49 @@ def main_menu() -> None:
 
         if user_manual_nums and user_manual_count > 0:
             if user_manual_mode == 1:
-                status_menu_9 = f"{user_manual_nums} ({user_manual_count}게임 적용 중)"
-                status_menu_10 = "비활성 (9번 모드 가동 중)"
+                status_menu_9 = f"\033[1;93m{user_manual_nums}\033[0m ({user_manual_count:,}게임 적용 중)"
+                status_menu_10 = "비활성 (8번 모드 가동 중)"
             elif user_manual_mode == 2:
-                status_menu_9 = "비활성 (10번 모드 가동 중)"
-                status_menu_10 = f"{user_manual_nums} ({user_manual_count}게임 적용 중)"
+                status_menu_9 = "비활성 (9번 모드 가동 중)"
+                status_menu_10 = f"\033[1;93m{user_manual_nums}\033[0m ({user_manual_count:,}게임 적용 중)"
 
         status_menu_11 = "없음"
         status_menu_12 = "없음"
 
         if user_exclude_nums:
             if user_exclude_mode == 1:
-                status_menu_11 = f"{user_exclude_nums} (원천 차단 적용 중)"
-                status_menu_12 = "비활성 (11번 모드 가동 중)"
+                status_menu_11 = f"\033[1;93m{user_exclude_nums}\033[0m (원천 차단 적용 중)"
+                status_menu_12 = "비활성 (10번 모드 가동 중)"
             elif user_exclude_mode == 2:
-                status_menu_11 = "비활성 (12번 모드 가동 중)"
-                status_menu_12 = f"{user_exclude_nums} (원천 차단 적용 중)"
+                status_menu_11 = "비활성 (11번 모드 가동 중)"
+                status_menu_12 = f"\033[1;93m{user_exclude_nums}\033[0m (원천 차단 적용 중)"
 
         active_dyn_count = sum(1 for v in dynamic_filters.values() if v)
+        active_count_str = f"\033[1;93m{active_dyn_count}개\033[0m" if active_dyn_count > 0 else f"{active_dyn_count}개"
 
         print("\n" + "#" * 78)
-        print(" [LOTTO 6/45 AI 최적화 엔지니어링 시스템 v1.9]")
+        print(" [LOTTO 6/45 AI 최적화 엔지니어링 시스템 v2.2]")
         print("#" * 78)
-        print("  1. 최신 당첨 이력 동기화 (오프라인 CSV / 온라인 벌크 크롤러)")
-        print(f"  2. [분석] 당첨 패턴 정밀 진단 및 동적 하드필터 설정 (현재 활성: {active_dyn_count}개)")
+        print("  1. 최신 당첨 이력 동기화 (오프라인 CSV / 온라인 신규 REST API)")
+        print(f"  2. [분석] 당첨 패턴 정밀 진단 및 동적 하드필터 설정 (현재 활성: {active_count_str})")
         print("  3. 다음 회차 추천 조합 생성 (Hard Filter -> Soft Scoring 추출)")
         print("  4. 회차별 사후 감사 및 정밀도 검증 (Audit & Recall Test)")
         print("-" * 78)
-        print(f"  5. [예산] 주간 구매 예산 설정            (현재: {user_budget:,}원 -> {output_count}게임)")
+        print(f"  5. [예산] 주간 구매 예산 설정            (현재: {user_budget:,}원 -> {output_count:,}게임)")
         print(f"  6. [제외] 배제 Zone (-100점)             (현재: {user_excluded_zones if user_excluded_zones else '없음'})")
         print(
             f"  7. [우대] 가점 Zone (+20점)              (현재: {user_bonus_score_zones if user_bonus_score_zones else '없음'})")
-        print(
-            f"  8. [할당] 우대 Zone 주입 (Max 30%)       (현재: {user_bonus_quota_zones if user_bonus_quota_zones else '없음'})")
-        print(f"  9. [고정수 A] 수동 할당 (원칙: 70점컷)   (현재: {status_menu_9})")
-        print(f" 10. [고정수 B] 수동 할당 (실용: 강제추출) (현재: {status_menu_10})")
-        print(f" 11. [제외수 A] 수동 제외 (원칙: 70점컷)   (현재: {status_menu_11})")
-        print(f" 12. [제외수 B] 수동 제외 (실용: 강제추출) (현재: {status_menu_12})")
+        print(f"  8. [고정수 A] 수동 할당 (원칙: 70점컷)   (현재: {status_menu_9})")
+        print(f"  9. [고정수 B] 수동 할당 (실용: 강제추출) (현재: {status_menu_10})")
+        print(f" 10. [제외수 A] 수동 제외 (원칙: 70점컷)   (현재: {status_menu_11})")
+        print(f" 11. [제외수 B] 수동 제외 (실용: 강제추출) (현재: {status_menu_12})")
         print("=" * 78)
-        print(" 13. [초기화] 모든 수동 설정 및 예산 초기화 (Default 리셋)")
-        print(" 14. [조회] 과거 회차 시스템 추천 조합 복구 조회")
-        print(" 15. 시스템 안전 종료")
+        print(" 12. [초기화] 모든 수동 설정 및 예산 초기화 (Default 리셋)")
+        print(" 13. [조회] 과거 회차 시스템 추천 조합 복구 조회")
+        print(" 14. 시스템 안전 종료")
         print("#" * 78)
 
-        choice = input("명령 번호를 선택하십시오 (1-15): ").strip()
+        choice = input("명령 번호를 선택하십시오 (1-14): ").strip()
 
         if choice == "1":
             handle_data_sync_menu()
@@ -551,7 +609,7 @@ def main_menu() -> None:
             if existing_count > 0:
                 print("\n" + "!" * 65)
                 print(f" [시스템 알림] 주의: 제 {target_round}회차 추천 내역이 이미 존재합니다.")
-                print(f" -> 현재 DB에 저장된 발급 대기 물량: [{existing_count} 게임]")
+                print(f" -> 현재 DB에 저장된 발급 대기 물량: [{existing_count:,} 게임]")
                 print("!" * 65)
                 print(" [1] 기존 내역 폐기 후 신규 추출")
                 print(" [2] 기존 내역 유지 및 중복 방지 누적 추출 (Append)")
@@ -560,19 +618,19 @@ def main_menu() -> None:
 
                 if sub_choice == "2":
                     append_mode = True
-                    print(f"\n -> [설정] 기존 {existing_count}게임을 유지하고, 새로운 {output_count}게임을 중복 없이 추가 추출합니다.")
+                    print(f"\n -> [설정] 기존 {existing_count:,}게임을 유지하고, 새로운 {output_count:,}게임을 중복 없이 추가 추출합니다.")
                 else:
                     print("\n -> [설정] 기존 내역을 안전하게 삭제하고 새롭게 추출합니다.")
 
             run_prediction_pipeline(
-                user_excluded_zones, user_bonus_score_zones, user_bonus_quota_zones,
+                user_excluded_zones, user_bonus_score_zones,
                 output_count, user_manual_nums, user_manual_count, user_manual_mode,
                 user_exclude_nums, user_exclude_mode, append_mode, dynamic_filters
             )
         elif choice == "4":
             run_audit_pipeline()
         elif choice == "5":
-            budget_input = input("\n구입할 예산 금액을 입력하십시오 (예: 5000, 20000): ").strip()
+            budget_input = input("\n구입할 예산 금액을 입력하십시오 (예: 5000, 20000, 100000000): ").strip()
             try:
                 parsed_budget = int(budget_input)
                 if parsed_budget <= 0 or parsed_budget % 1000 != 0:
@@ -580,7 +638,7 @@ def main_menu() -> None:
                 else:
                     user_budget = parsed_budget
                     if user_manual_count > (user_budget // 1000):
-                        print(f"[조정] 수동 할당 게임 수가 예산을 초과하여 {user_budget // 1000}게임으로 하향 조정됩니다.")
+                        print(f"[조정] 수동 할당 게임 수가 예산을 초과하여 {user_budget // 1000:,}게임으로 하향 조정됩니다.")
                         user_manual_count = user_budget // 1000
             except ValueError:
                 print("[오류] 유효한 숫자를 입력하십시오.")
@@ -603,18 +661,8 @@ def main_menu() -> None:
                                               1 <= z <= 10]
                 except Exception as e:
                     print(f"[오류] 유효하지 않은 입력입니다. ({e})")
-        elif choice == "8":
-            zone_input = input("\n할당량(Max 30%)을 주입할 Zone ID(1~10)를 쉼표로 구분하여 입력 (초기화는 엔터): ").strip()
-            if not zone_input:
-                user_bonus_quota_zones = []
-            else:
-                try:
-                    user_bonus_quota_zones = [z for z in [int(x.strip()) for x in zone_input.split(",")] if
-                                              1 <= z <= 10]
-                except Exception as e:
-                    print(f"[오류] 유효하지 않은 입력입니다. ({e})")
-        elif choice in ["9", "10"]:
-            mode_name = "원칙주의(70점 미달 시 폐기)" if choice == "9" else "실용주의(점수 무시 상위 추출)"
+        elif choice in ["8", "9"]:
+            mode_name = "원칙주의(70점 컷오프 유지)" if choice == "8" else "실용주의(점수 무시 상위 추출)"
             nums_input = input(f"\n[{mode_name}] 고정수 1~5개를 쉼표로 구분하여 입력 (초기화는 엔터): ").strip()
             if not nums_input:
                 user_manual_nums = []
@@ -628,20 +676,20 @@ def main_menu() -> None:
                         print("[오류] 번호는 1~45 사이여야 하며, 중복 없이 1개에서 최대 5개까지만 입력 가능합니다.")
                         continue
 
-                    count_input = input(f"해당 고정수를 몇 게임에 할당하시겠습니까? (최대 {output_count}게임): ").strip()
+                    count_input = input(f"해당 고정수를 몇 게임에 할당하시겠습니까? (최대 {output_count:,}게임): ").strip()
                     parsed_count = int(count_input)
                     if parsed_count < 1 or parsed_count > output_count:
-                        print(f"[오류] 할당 게임 수는 1 이상, 전체 예산({output_count}게임) 이하여야 합니다.")
+                        print(f"[오류] 할당 게임 수는 1 이상, 전체 예산({output_count:,}게임) 이하여야 합니다.")
                         continue
 
                     user_manual_nums = parsed_nums
                     user_manual_count = parsed_count
-                    user_manual_mode = 1 if choice == "9" else 2
-                    print(f"[설정] 파이프라인 가동 시 {user_manual_nums} 고정수 조합이 {user_manual_count}게임 할당됩니다.")
+                    user_manual_mode = 1 if choice == "8" else 2
+                    print(f"[설정] 파이프라인 가동 시 {user_manual_nums} 고정수 조합이 {user_manual_count:,}게임 할당됩니다.")
                 except Exception as e:
                     print(f"[오류] 유효하지 않은 입력입니다. ({e})")
-        elif choice in ["11", "12"]:
-            mode_name = "원칙주의(70점 미달 시 제외)" if choice == "11" else "실용주의(점수 미달 시 강제 추출 보충)"
+        elif choice in ["10", "11"]:
+            mode_name = "원칙주의(70점 컷오프 유지)" if choice == "10" else "실용주의(점수 미달 시 강제 추출 보충)"
             nums_input = input(f"\n[{mode_name}] 원천 배제할 제외수를 쉼표로 구분하여 입력 (초기화는 엔터): ").strip()
             if not nums_input:
                 user_exclude_nums = []
@@ -655,15 +703,14 @@ def main_menu() -> None:
                         continue
 
                     user_exclude_nums = parsed_nums
-                    user_exclude_mode = 1 if choice == "11" else 2
+                    user_exclude_mode = 1 if choice == "10" else 2
                     print(f"[설정] 파이프라인 가동 시 {user_exclude_nums} 번호가 포함된 조합은 전면 폐기됩니다.")
                 except Exception as e:
                     print(f"[오류] 유효하지 않은 입력입니다. ({e})")
-        elif choice == "13":
+        elif choice == "12":
             user_budget = 10000
             user_excluded_zones = []
             user_bonus_score_zones = []
-            user_bonus_quota_zones = []
             user_manual_nums = []
             user_manual_count = 0
             user_manual_mode = 0
@@ -672,9 +719,9 @@ def main_menu() -> None:
             for k in dynamic_filters.keys():
                 dynamic_filters[k] = False
             print("\n[초기화 완료] 모든 사용자 정의 설정(예산/제외/우대/동적필터 등)이 기본 상태로 리셋되었습니다.")
-        elif choice == "14":
+        elif choice == "13":
             view_past_recommendations()
-        elif choice == "15":
+        elif choice == "14":
             print("\n시스템 자원을 반환하고 안전하게 종료합니다.")
             sys.exit(0)
         else:
